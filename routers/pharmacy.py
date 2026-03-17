@@ -116,7 +116,7 @@ def list_medications(page: int = 1, limit: int = 10, db: Session = Depends(get_d
         "data": items
     }
 
-@router.get("/medications/{codigo_medicamento}/inventory", response_model=PaginatedResponse[InventoryDetail])
+@router.get("/medications/inventory/{codigo_medicamento}", response_model=PaginatedResponse[InventoryDetail])
 def list_inventory_by_medication(codigo_medicamento: int,page: int = 1,limit: int = 10,db: Session = Depends(get_db)):
     if page < 1: page = 1
     skip = (page - 1) * limit
@@ -151,7 +151,7 @@ def list_inventory_by_medication(codigo_medicamento: int,page: int = 1,limit: in
         "data": items
     }
 
-@router.get("/low-stock", response_model=PaginatedResponse[InventoryWithMedicationRead])
+@router.get("/medications/low-stock", response_model=PaginatedResponse[InventoryWithMedicationRead])
 def get_low_stock_alerts(page: int = 1, limit: int = 10, db: Session = Depends(get_db)):
     # Umbral de alerta
     THRESHOLD = 100
@@ -178,7 +178,7 @@ def get_low_stock_alerts(page: int = 1, limit: int = 10, db: Session = Depends(g
         "data": items
     }
 
-@router.get("/expiring-soon", response_model=PaginatedResponse[InventoryWithMedicationRead])
+@router.get("/medications/expiring-soon", response_model=PaginatedResponse[InventoryWithMedicationRead])
 def get_expiring_soon_alerts(page: int = 1, limit: int = 10, db: Session = Depends(get_db)):
     # Rango de fechas
     hoy = datetime.now().date()

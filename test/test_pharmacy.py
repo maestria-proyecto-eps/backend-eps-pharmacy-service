@@ -242,7 +242,7 @@ def test_agregar_multiples_lotes_a_un_medicamento():
     assert json_response["Data"]["lote"] == "LOTE-BBB"
     assert json_response["Data"]["codigo_medicamento"] == codigo_med
 
-    res_listado = client.get(f"/api/pharmacy/medications/{codigo_med}/inventory")
+    res_listado = client.get(f"/api/pharmacy/medications/inventory/{codigo_med}")
     data_listado = res_listado.json()
 
     assert data_listado["hasElements"] is True
@@ -312,7 +312,7 @@ def test_paginacion_medicamentos():
     assert len(data_p5["data"]) == 0
 def test_lotes_medicamento_inexistente():
     codigo_no_existe = 999999
-    response = client.get(f"/api/pharmacy/medications/{codigo_no_existe}/inventory")
+    response = client.get(f"/api/pharmacy/medications/inventory/{codigo_no_existe}")
     data = response.json()
 
     assert response.status_code == 200
@@ -333,7 +333,7 @@ def test_lotes_medicamento_sin_lotes():
     client.post("/api/pharmacy/medications", json=payload_med)
 
     # Consultar sus lotes
-    response = client.get(f"/api/pharmacy/medications/{codigo_vacio}/inventory")
+    response = client.get(f"/api/pharmacy/medications/inventory/{codigo_vacio}")
     data = response.json()
 
     assert data["hasElements"] is False
@@ -362,7 +362,7 @@ def test_paginacion_lotes_especifico():
         client.post(f"/api/pharmacy/medications/inventory/{codigo_med}", json=l)
 
     # Probar Página 1 con límite 2
-    response = client.get(f"/api/pharmacy/medications/{codigo_med}/inventory?page=1&limit=2")
+    response = client.get(f"/api/pharmacy/medications/inventory/{codigo_med}?page=1&limit=2")
     data = response.json()
 
     assert data["page"] == 1
@@ -372,7 +372,7 @@ def test_paginacion_lotes_especifico():
     assert data["data"][1]["lote"] == "LOTE-B"
 
     # Probar Página 2
-    response_p2 = client.get(f"/api/pharmacy/medications/{codigo_med}/inventory?page=2&limit=2")
+    response_p2 = client.get(f"/api/pharmacy/medications/inventory/{codigo_med}?page=2&limit=2")
     data_p2 = response_p2.json()
 
     assert data_p2["page"] == 2
@@ -406,7 +406,7 @@ def test_alerta_stock_bajo():
     })
 
     # Consultar endpoint de alertas
-    response = client.get("/api/pharmacy/low-stock?page=1&limit=10")
+    response = client.get("/api/pharmacy/medications/low-stock?page=1&limit=10")
     data = response.json()
 
     assert response.status_code == 200
@@ -453,7 +453,7 @@ def test_alertas_vencimiento_proximo():
     })
 
     # Consultar endpoint
-    response = client.get("/api/pharmacy/expiring-soon?page=1&limit=10")
+    response = client.get("/api/pharmacy/medications/expiring-soon?page=1&limit=10")
     data = response.json()
 
     assert response.status_code == 200
