@@ -16,6 +16,7 @@ DBNAME = os.getenv("DB_OP_NAME")
 # Construcción de la URL con SSL requerido para Supabase
 DATABASE_URL = f"postgresql+psycopg2://{USER}:{PASSWORD}@{HOST}:{PORT}/{DBNAME}?sslmode=require"
 
+print(DATABASE_URL)
 engine = create_engine(DATABASE_URL, poolclass=NullPool)
 
 SessionLocal = sessionmaker(
