@@ -254,7 +254,13 @@ def update_inventory_batch(id_inventario: int,payload: InventoryBatchCreate,db: 
             "Message": f"No se encontró el lote con ID {id_inventario}.",
             "Data": None
         }
-
+    hoy = datetime.now().date()
+    if batch_db.fecha_vencimiento < hoy:
+        return {
+            "hasError": True,
+            "Message": "No es posible editar este lote porque el medicamento ya se encuentra vencido.",
+            "Data": batch_db
+        }
     # Actualizar solo los campos del lote
     batch_db.lote = payload.lote
     batch_db.cantidad = payload.cantidad
