@@ -1,26 +1,46 @@
-import os
-import sys
-from pathlib import Path
+import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 from datetime import datetime, timedelta
-
-os.environ["DB_OP_USER"] = "postgres.nakqairpmqeeotkxwztv"
-os.environ["DB_OP_PASSWORD"] = "Cu1d4rt3Op3r4tiv4%"
-os.environ["DB_OP_HOST"] = "aws-0-us-west-2.pooler.supabase.com"
-os.environ["DB_OP_PORT"] = "5432"
-os.environ["DB_OP_NAME"] = "postgres"
-
-os.environ["JWT_SECRET"] = "clave_secreta"
-os.environ["JWT_ALGORITHM"] = "HS256"
-os.environ["JWT_EXPIRES_MINUTES"] = "480"
-
-from main import app
 import random
+from db.session import Base, get_db
+from main import app
 
+#  CONFIGURACIÓN DEL MOCK
+SQLALCHEMY_DATABASE_URL = "sqlite://"
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL,
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+def override_get_db():
+    try:
+        db = TestingSessionLocal()
+        yield db
+    finally:
+        db.close()
+
+# Inyectamos el mock en la aplicación
+app.dependency_overrides[get_db] = override_get_db
 client = TestClient(app)
 
-RANDOM_CODE_BASE = random.randint(20000, 30000)
-RANDOM_NAME = f"Acetaminofén_Test_{RANDOM_CODE_BASE}"
+# limpiar la base de datos antes de cada test individual
+@pytest.fixture(autouse=True)
+def setup_db():
+    Base.metadata.create_all(bind=engine)
+    yield
+    Base.metadata.drop_all(bind=engine)
+
+
+RANDOM_CODE_BASE = 20000
+RANDOM_NAME = "Acetaminofén_Test_Mock"
+
+
 
 def test_health_check():
     response = client.get("/")
@@ -49,15 +69,23 @@ def test_crear_medicamento_exitoso():
     assert data["presentacion"] == payload["presentacion"]
     assert data["principio_activo"] == payload["principio_activo"]
 def test_crear_medicamento_codigo_repetido():
-    payload = {
-        "codigo": RANDOM_CODE_BASE, # Código ya usado
+    payload_original = {
+        "codigo": RANDOM_CODE_BASE,
+        "nombre_medicamento": RANDOM_NAME,
+        "reg_invima": 2026123,
+        "principio_activo": "Acetaminofén",
+        "presentacion": "Tabletas 500mg"
+    }
+    client.post("/api/pharmacy/medications", json=payload_original)
+    payload_repetido = {
+        "codigo": RANDOM_CODE_BASE,
         "nombre_medicamento": "Otro Nombre Diferente",
         "reg_invima": 99999,
         "principio_activo": "Otro",
         "presentacion": "Jarabe"
     }
 
-    response = client.post("/api/pharmacy/medications", json=payload)
+    response = client.post("/api/pharmacy/medications", json=payload_repetido)
     json_response = response.json()
 
     assert response.status_code == 201
@@ -69,6 +97,14 @@ def test_crear_medicamento_codigo_repetido():
     assert data["codigo"] == RANDOM_CODE_BASE
     assert data["nombre_medicamento"] == RANDOM_NAME # El nombre original
 def test_crear_medicamento_nombre_y_presentacion_repetidos():
+    payload_original = {
+        "codigo": RANDOM_CODE_BASE,
+        "nombre_medicamento": RANDOM_NAME,
+        "reg_invima": 2026123,
+        "principio_activo": "Acetaminofén",
+        "presentacion": "Tabletas 500mg"
+    }
+    client.post("/api/pharmacy/medications", json=payload_original)
     payload = {
         "codigo": RANDOM_CODE_BASE + 1,
         "nombre_medicamento": RANDOM_NAME, # Nombre repetido
@@ -527,10 +563,44 @@ def test_actualizar_lote_inventario_exitoso():
     assert json_response["Data"]["lote"] == "LOTE-CORREGIDO"
     assert json_response["Data"]["cantidad"] == 150
     assert json_response["Data"]["id_inventario"] == id_generado
-def test_borrar_datos():
-    response = client.delete("/api/pharmacy/debug/clear-all-data")
-    assert response.status_code == 200
-    assert response.json()["hasError"] is False
-    assert "Todas las tablas han sido vaciadas y los contadores reiniciados." in response.json()["Message"]
+def test_bloqueo_edicion_lote_vencido():
+    cod_med = 99000
+    client.post("/api/pharmacy/medications", json={
+        "codigo": cod_med,
+        "nombre_medicamento": "Med_Para_Bloqueo",
+        "reg_invima": 123,
+        "principio_activo": "Test",
+        "presentacion": "Tab"
+    })
+
+    fecha_vencida = (datetime.now() - timedelta(days=5)).date().isoformat()
+
+    res_creacion = client.post(f"/api/pharmacy/medications/inventory/{cod_med}", json={
+        "lote": "LOTE-EXPIRADO",
+        "cantidad": 100,
+        "fecha_vencimiento": fecha_vencida,
+        "precio": 1000
+    })
+
+    id_inventario = res_creacion.json()["Data"]["id_inventario"]
+
+
+    payload_update = {
+        "lote": "LOTE-INTENTO-CAMBIO",
+        "cantidad": 500,
+        "fecha_vencimiento": "2028-01-01", # Intentamos una fecha
+        "precio": 2000
+    }
+
+    response = client.put(f"/api/pharmacy/medications/inventory/{id_inventario}", json=payload_update)
+    json_response = response.json()
+
+
+    assert json_response["hasError"] is True
+    assert "no es posible editar" in json_response["Message"].lower()
+    assert "vencido" in json_response["Message"].lower()
+
+    assert json_response["Data"]["lote"] == "LOTE-EXPIRADO"
+    assert json_response["Data"]["cantidad"] == 100
 
 
