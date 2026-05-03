@@ -9,7 +9,11 @@ from schemas.pharmacy import GenericResponse,  PaginatedResponse, APIResponse
 from schemas.pharmacy import MedicationCreate, MedicationWithBatchesRead, MedicationRead, MedicationRead2
 from schemas.pharmacy import InventoryWithMedicationRead,InventoryWithMedicationRead2,InventoryBatchCreate,InventoryDetail
 from datetime import datetime, timedelta
-router = APIRouter(prefix="/api/pharmacy", tags=["Pharmacy"])
+
+from core.dependencias import RequireRole
+from models.user import USUARIOS
+
+router = APIRouter(prefix="/api/pharmacy", tags=["Pharmacy"],dependencies = [Depends(RequireRole(["Farmaceuta"]))])
 
 @router.post("/medications", status_code=201, response_model=GenericResponse[MedicationWithBatchesRead])
 def create_medication(med: MedicationCreate, db: Session = Depends(get_db)):
