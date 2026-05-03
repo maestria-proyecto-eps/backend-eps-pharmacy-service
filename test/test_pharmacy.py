@@ -8,6 +8,13 @@ import random
 from db.session import Base, get_db
 from main import app
 
+
+from models.user import USUARIOS, ROLES, PERSONA
+from models.medicamentos import MEDICAMENTOS, INVENTARIO
+from datetime import datetime, timedelta, timezone
+from jose import jwt
+from core.config import settings
+
 #  CONFIGURACIÓN DEL MOCK
 SQLALCHEMY_DATABASE_URL = "sqlite://"
 
@@ -36,6 +43,50 @@ def setup_db():
     yield
     Base.metadata.drop_all(bind=engine)
 
+@pytest.fixture
+def auth_headers():
+    db = TestingSessionLocal()
+    try:
+        rol = db.query(ROLES).filter(ROLES.id_rol == 5).first()
+        if not rol:
+            rol = ROLES(id_rol=5, nombre_rol="Farmaceuta")
+            db.add(rol)
+            db.commit()
+        persona = db.query(PERSONA).filter(PERSONA.num_documento == 12345678).first()
+        if not persona:
+            persona = PERSONA(num_documento=12345678, nombres="Test", apellidos="User")
+            db.add(persona)
+            db.commit()
+        usuario = db.query(USUARIOS).filter(USUARIOS.id_usuario == 1).first()
+        if not usuario:
+            usuario = USUARIOS(
+                id_usuario=1,
+                num_documento=12345678,
+                id_rol=5,
+                password="hash_falso",
+                estado=True
+            )
+            db.add(usuario)
+            db.commit()
+
+        datos_usuario = {
+            "id_usuario": 1,
+            "num_documento": 12345678,
+            "id_role": 5,
+            "role": "Farmaceuta"
+        }
+        token = crear_token_acceso(data=datos_usuario)
+        return {"Authorization": f"Bearer {token}"}
+    except Exception as e:
+        db.rollback()
+        raise e
+    finally:
+        db.close()
+def crear_token_acceso(data: dict):
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=settings.JWT_EXPIRES_MINUTES)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=settings.JWT_ALGORITHM)
 
 RANDOM_CODE_BASE = 20000
 RANDOM_NAME = "Acetaminofén_Test_Mock"
@@ -46,7 +97,7 @@ def test_health_check():
     response = client.get("/")
     assert response.status_code in [200, 404]
 
-def test_crear_medicamento_exitoso():
+def test_crear_medicamento_exitoso(auth_headers):
     payload = {
         "codigo": RANDOM_CODE_BASE,
         "nombre_medicamento": RANDOM_NAME,
@@ -55,7 +106,7 @@ def test_crear_medicamento_exitoso():
         "presentacion": "Tabletas 500mg"
     }
 
-    response = client.post("/api/pharmacy/medications", json=payload)
+    response = client.post("/api/pharmacy/medications", json=payload, headers=auth_headers)
     json_response = response.json()
 
     assert response.status_code == 201
@@ -68,7 +119,7 @@ def test_crear_medicamento_exitoso():
     assert data["nombre_medicamento"] == payload["nombre_medicamento"]
     assert data["presentacion"] == payload["presentacion"]
     assert data["principio_activo"] == payload["principio_activo"]
-def test_crear_medicamento_codigo_repetido():
+def test_crear_medicamento_codigo_repetido(auth_headers):
     payload_original = {
         "codigo": RANDOM_CODE_BASE,
         "nombre_medicamento": RANDOM_NAME,
@@ -76,7 +127,7 @@ def test_crear_medicamento_codigo_repetido():
         "principio_activo": "Acetaminofén",
         "presentacion": "Tabletas 500mg"
     }
-    client.post("/api/pharmacy/medications", json=payload_original)
+    client.post("/api/pharmacy/medications", json=payload_original, headers=auth_headers)
     payload_repetido = {
         "codigo": RANDOM_CODE_BASE,
         "nombre_medicamento": "Otro Nombre Diferente",
@@ -85,7 +136,7 @@ def test_crear_medicamento_codigo_repetido():
         "presentacion": "Jarabe"
     }
 
-    response = client.post("/api/pharmacy/medications", json=payload_repetido)
+    response = client.post("/api/pharmacy/medications", json=payload_repetido, headers=auth_headers)
     json_response = response.json()
 
     assert response.status_code == 201
@@ -96,7 +147,7 @@ def test_crear_medicamento_codigo_repetido():
     data = json_response["Data"]
     assert data["codigo"] == RANDOM_CODE_BASE
     assert data["nombre_medicamento"] == RANDOM_NAME # El nombre original
-def test_crear_medicamento_nombre_y_presentacion_repetidos():
+def test_crear_medicamento_nombre_y_presentacion_repetidos(auth_headers):
     payload_original = {
         "codigo": RANDOM_CODE_BASE,
         "nombre_medicamento": RANDOM_NAME,
@@ -104,7 +155,7 @@ def test_crear_medicamento_nombre_y_presentacion_repetidos():
         "principio_activo": "Acetaminofén",
         "presentacion": "Tabletas 500mg"
     }
-    client.post("/api/pharmacy/medications", json=payload_original)
+    client.post("/api/pharmacy/medications", json=payload_original, headers=auth_headers)
     payload = {
         "codigo": RANDOM_CODE_BASE + 1,
         "nombre_medicamento": RANDOM_NAME, # Nombre repetido
@@ -113,7 +164,7 @@ def test_crear_medicamento_nombre_y_presentacion_repetidos():
         "presentacion": "Tabletas 500mg" # Presentación repetida
     }
 
-    response = client.post("/api/pharmacy/medications", json=payload)
+    response = client.post("/api/pharmacy/medications", json=payload, headers=auth_headers)
     json_response = response.json()
 
     assert response.status_code == 201
@@ -125,7 +176,7 @@ def test_crear_medicamento_nombre_y_presentacion_repetidos():
     data = json_response["Data"]
     assert data["codigo"] == RANDOM_CODE_BASE
     assert data["nombre_medicamento"] == RANDOM_NAME
-def test_crear_medicamento_mismo_nombre_diferente_presentacion():
+def test_crear_medicamento_mismo_nombre_diferente_presentacion(auth_headers):
     """Escenario 4: Mismo nombre pero presentación distinta (debe permitir crear)."""
     NUEVA_PRESENTACION = "Suspensión Oral 120mg"
     payload = {
@@ -136,7 +187,7 @@ def test_crear_medicamento_mismo_nombre_diferente_presentacion():
         "presentacion": NUEVA_PRESENTACION # Presentación nueva
     }
 
-    response = client.post("/api/pharmacy/medications", json=payload)
+    response = client.post("/api/pharmacy/medications", json=payload, headers=auth_headers)
     json_response = response.json()
 
     assert response.status_code == 201
@@ -148,7 +199,7 @@ def test_crear_medicamento_mismo_nombre_diferente_presentacion():
     assert data["codigo"] == RANDOM_CODE_BASE + 2
     assert data["presentacion"] == NUEVA_PRESENTACION
     assert data["nombre_medicamento"] == RANDOM_NAME
-def test_asociar_lote_medicamento_no_existente():
+def test_asociar_lote_medicamento_no_existente(auth_headers):
     """
     Escenario: Intento de agregar un lote a un medicamento inexistente.
     """
@@ -160,7 +211,7 @@ def test_asociar_lote_medicamento_no_existente():
         "precio": 15000
     }
 
-    response = client.post(f"/api/pharmacy/medications/inventory/{codigo_inexistente}", json=payload)
+    response = client.post(f"/api/pharmacy/medications/inventory/{codigo_inexistente}", json=payload, headers=auth_headers)
 
     # Si recibes un 422, imprimimos el detalle para saber qué campo falló
     if response.status_code == 422:
@@ -173,7 +224,7 @@ def test_asociar_lote_medicamento_no_existente():
     assert json_response["hasError"] is True
     assert "no existe" in json_response["Message"]
     assert json_response["Data"] is None
-def test_agregar_lote_exitoso():
+def test_agregar_lote_exitoso(auth_headers):
     # Crear el medicamento base
     codigo_test = RANDOM_CODE_BASE + 50
     payload_med = {
@@ -183,7 +234,7 @@ def test_agregar_lote_exitoso():
         "principio_activo": "Loratadina",
         "presentacion": "Tabletas 10mg"
     }
-    client.post("/api/pharmacy/medications", json=payload_med)
+    client.post("/api/pharmacy/medications", json=payload_med, headers=auth_headers)
 
     # lote para ese medicamento
     payload_lote = {
@@ -193,7 +244,7 @@ def test_agregar_lote_exitoso():
         "precio": 12500
     }
 
-    response = client.post(f"/api/pharmacy/medications/inventory/{codigo_test}", json=payload_lote)
+    response = client.post(f"/api/pharmacy/medications/inventory/{codigo_test}", json=payload_lote, headers=auth_headers)
     json_response = response.json()
 
     assert response.status_code == 201
@@ -205,7 +256,7 @@ def test_agregar_lote_exitoso():
     assert data["lote"] == payload_lote["lote"]
     assert data["codigo_medicamento"] == codigo_test
     assert "id_inventario" in data  # Verificamos que se generó la PK
-def test_agregar_lote_duplicado():
+def test_agregar_lote_duplicado(auth_headers):
     # Agregar Medicamento
     codigo_med = RANDOM_CODE_BASE + 100
     payload_med = {
@@ -215,7 +266,7 @@ def test_agregar_lote_duplicado():
         "principio_activo": "Test",
         "presentacion": "Tabletas"
     }
-    client.post("/api/pharmacy/medications", json=payload_med)
+    client.post("/api/pharmacy/medications", json=payload_med, headers=auth_headers)
 
     # Registrar el lote por primera vez
     lote_nombre = "LOTE-UNICO-123"
@@ -226,12 +277,12 @@ def test_agregar_lote_duplicado():
         "precio": 5000
     }
 
-    primer_res = client.post(f"/api/pharmacy/medications/inventory/{codigo_med}", json=payload_lote)
+    primer_res = client.post(f"/api/pharmacy/medications/inventory/{codigo_med}", json=payload_lote, headers=auth_headers)
     data_original = primer_res.json()["Data"]
     id_original = data_original["id_inventario"]
 
     # Registrar exactamente el mismo lote
-    segundo_res = client.post(f"/api/pharmacy/medications/inventory/{codigo_med}", json=payload_lote)
+    segundo_res = client.post(f"/api/pharmacy/medications/inventory/{codigo_med}", json=payload_lote, headers=auth_headers)
     json_response = segundo_res.json()
 
     assert segundo_res.status_code == 201
@@ -241,7 +292,7 @@ def test_agregar_lote_duplicado():
     assert data_retornada["id_inventario"] == id_original
     assert data_retornada["lote"] == lote_nombre
     assert data_retornada["codigo_medicamento"] == codigo_med
-def test_agregar_multiples_lotes_a_un_medicamento():
+def test_agregar_multiples_lotes_a_un_medicamento(auth_headers):
 
     # Crear el medicamento base
     codigo_med = RANDOM_CODE_BASE + 200
@@ -252,7 +303,7 @@ def test_agregar_multiples_lotes_a_un_medicamento():
         "principio_activo": "Multi-test",
         "presentacion": "Ampolla"
     }
-    client.post("/api/pharmacy/medications", json=payload_med)
+    client.post("/api/pharmacy/medications", json=payload_med, headers=auth_headers)
 
     # Agregar el Primer Lote
     lote_1 = {
@@ -261,7 +312,7 @@ def test_agregar_multiples_lotes_a_un_medicamento():
         "fecha_vencimiento": "2026-05-20",
         "precio": 1000
     }
-    client.post(f"/api/pharmacy/medications/inventory/{codigo_med}", json=lote_1)
+    client.post(f"/api/pharmacy/medications/inventory/{codigo_med}", json=lote_1, headers=auth_headers)
 
     # Agregar el Segundo Lote
     lote_2 = {
@@ -270,7 +321,7 @@ def test_agregar_multiples_lotes_a_un_medicamento():
         "fecha_vencimiento": "2026-08-15",
         "precio": 1200
     }
-    response = client.post(f"/api/pharmacy/medications/inventory/{codigo_med}", json=lote_2)
+    response = client.post(f"/api/pharmacy/medications/inventory/{codigo_med}", json=lote_2, headers=auth_headers)
     json_response = response.json()
 
     assert response.status_code == 201
@@ -278,7 +329,7 @@ def test_agregar_multiples_lotes_a_un_medicamento():
     assert json_response["Data"]["lote"] == "LOTE-BBB"
     assert json_response["Data"]["codigo_medicamento"] == codigo_med
 
-    res_listado = client.get(f"/api/pharmacy/medications/inventory/{codigo_med}")
+    res_listado = client.get(f"/api/pharmacy/medications/inventory/{codigo_med}", headers=auth_headers)
     data_listado = res_listado.json()
 
     assert data_listado["hasElements"] is True
@@ -292,9 +343,10 @@ def test_agregar_multiples_lotes_a_un_medicamento():
     cantidades = [l["cantidad"] for l in lista_lotes]
     assert 100 in cantidades
     assert 250 in cantidades
-def test_paginacion_medicamentos():
+
+def test_paginacion_medicamentos(auth_headers):
     # Limpiar datos previos
-    client.delete("/api/pharmacy/debug/clear-all-data")
+    client.delete("/api/pharmacy/debug/clear-all-data", headers=auth_headers)
 
     # Crear 10 medicamentos aleatorios
     nombres_creados = []
@@ -310,10 +362,10 @@ def test_paginacion_medicamentos():
             "principio_activo": "Generico",
             "presentacion": "Tableta"
         }
-        client.post("/api/pharmacy/medications", json=payload)
+        client.post("/api/pharmacy/medications", json=payload, headers=auth_headers)
 
     # Probar Página 1 (Límite 3)
-    response_p1 = client.get("/api/pharmacy/medications?page=1&limit=3")
+    response_p1 = client.get("/api/pharmacy/medications?page=1&limit=3", headers=auth_headers)
     data_p1 = response_p1.json()
 
     assert response_p1.status_code == 200
@@ -325,7 +377,7 @@ def test_paginacion_medicamentos():
     assert data_p1["data"][0]["nombre_medicamento"] == nombres_creados[0]
 
     # Probar Página 2 (Límite 3)
-    response_p2 = client.get("/api/pharmacy/medications?page=2&limit=3")
+    response_p2 = client.get("/api/pharmacy/medications?page=2&limit=3", headers=auth_headers)
     data_p2 = response_p2.json()
 
     assert data_p2["page"] == 2
@@ -335,27 +387,27 @@ def test_paginacion_medicamentos():
 
     # Última Página (Página 4)
     # Debería tener solo 1 elemento
-    response_p4 = client.get("/api/pharmacy/medications?page=4&limit=3")
+    response_p4 = client.get("/api/pharmacy/medications?page=4&limit=3", headers=auth_headers)
     data_p4 = response_p4.json()
     assert data_p4["page"] == 4
     assert len(data_p4["data"]) == 1
     assert data_p4["data"][0]["nombre_medicamento"] == nombres_creados[9]
 
     # Probar página fuera de rango
-    response_p5 = client.get("/api/pharmacy/medications?page=5&limit=3")
+    response_p5 = client.get("/api/pharmacy/medications?page=5&limit=3", headers=auth_headers)
     data_p5 = response_p5.json()
     assert data_p5["hasElements"] is False
     assert len(data_p5["data"]) == 0
-def test_lotes_medicamento_inexistente():
+def test_lotes_medicamento_inexistente(auth_headers):
     codigo_no_existe = 999999
-    response = client.get(f"/api/pharmacy/medications/inventory/{codigo_no_existe}")
+    response = client.get(f"/api/pharmacy/medications/inventory/{codigo_no_existe}", headers=auth_headers)
     data = response.json()
 
     assert response.status_code == 200
     assert data["hasElements"] is False
     assert data["data"] == []
     assert data["Message"] == "Medicamento sin registrar o sin lotes asignados"
-def test_lotes_medicamento_sin_lotes():
+def test_lotes_medicamento_sin_lotes(auth_headers):
 
     # Crear el medicamento
     codigo_vacio = 77000
@@ -366,16 +418,16 @@ def test_lotes_medicamento_sin_lotes():
         "principio_activo": "N/A",
         "presentacion": "N/A"
     }
-    client.post("/api/pharmacy/medications", json=payload_med)
+    client.post("/api/pharmacy/medications", json=payload_med, headers=auth_headers)
 
     # Consultar sus lotes
-    response = client.get(f"/api/pharmacy/medications/inventory/{codigo_vacio}")
+    response = client.get(f"/api/pharmacy/medications/inventory/{codigo_vacio}", headers=auth_headers)
     data = response.json()
 
     assert data["hasElements"] is False
     assert len(data["data"]) == 0
     assert data["Message"] == "Medicamento sin registrar o sin lotes asignados"
-def test_paginacion_lotes_especifico():
+def test_paginacion_lotes_especifico(auth_headers):
 
     codigo_med = 88000
     # Crear medicamento
@@ -385,7 +437,7 @@ def test_paginacion_lotes_especifico():
         "reg_invima": 222,
         "principio_activo": "Test",
         "presentacion": "Capsula"
-    })
+    }, headers=auth_headers)
 
     # Crear 3 lotes con diferentes fechas
     lotes = [
@@ -395,10 +447,10 @@ def test_paginacion_lotes_especifico():
     ]
 
     for l in lotes:
-        client.post(f"/api/pharmacy/medications/inventory/{codigo_med}", json=l)
+        client.post(f"/api/pharmacy/medications/inventory/{codigo_med}", json=l, headers=auth_headers)
 
     # Probar Página 1 con límite 2
-    response = client.get(f"/api/pharmacy/medications/inventory/{codigo_med}?page=1&limit=2")
+    response = client.get(f"/api/pharmacy/medications/inventory/{codigo_med}?page=1&limit=2", headers=auth_headers)
     data = response.json()
 
     assert data["page"] == 1
@@ -408,14 +460,14 @@ def test_paginacion_lotes_especifico():
     assert data["data"][1]["lote"] == "LOTE-B"
 
     # Probar Página 2
-    response_p2 = client.get(f"/api/pharmacy/medications/inventory/{codigo_med}?page=2&limit=2")
+    response_p2 = client.get(f"/api/pharmacy/medications/inventory/{codigo_med}?page=2&limit=2", headers=auth_headers)
     data_p2 = response_p2.json()
 
     assert data_p2["page"] == 2
     assert len(data_p2["data"]) == 1
     assert data_p2["data"][0]["lote"] == "LOTE-C"
-def test_alerta_stock_bajo():
-    client.delete("/api/pharmacy/debug/clear-all-data")
+def test_alerta_stock_bajo(auth_headers):
+    client.delete("/api/pharmacy/debug/clear-all-data", headers=auth_headers)
 
     # Crear Medicamentos de prueba
     cod_a = 90001
@@ -424,25 +476,25 @@ def test_alerta_stock_bajo():
     client.post("/api/pharmacy/medications", json={
         "codigo": cod_a, "nombre_medicamento": "Med_Bajo_A",
         "reg_invima": 1, "principio_activo": "P1", "presentacion": "T1"
-    })
+    }, headers=auth_headers)
     client.post("/api/pharmacy/medications", json={
         "codigo": cod_b, "nombre_medicamento": "Med_Bajo_B",
         "reg_invima": 2, "principio_activo": "P2", "presentacion": "T2"
-    })
+    }, headers=auth_headers)
 
     # 3. Crear Lotes
     client.post(f"/api/pharmacy/medications/inventory/{cod_a}", json={
         "lote": "LOTE-BAJO-A", "cantidad": 50, "fecha_vencimiento": "2027-01-01", "precio": 1000
-    })
+    }, headers=auth_headers)
     client.post(f"/api/pharmacy/medications/inventory/{cod_b}", json={
         "lote": "LOTE-BAJO-B", "cantidad": 10, "fecha_vencimiento": "2027-01-01", "precio": 2000
-    })
+    }, headers=auth_headers)
     client.post(f"/api/pharmacy/medications/inventory/{cod_b}", json={
         "lote": "LOTE-ALTO", "cantidad": 150, "fecha_vencimiento": "2027-01-01", "precio": 3000
-    })
+    }, headers=auth_headers)
 
     # Consultar endpoint de alertas
-    response = client.get("/api/pharmacy/medications/low-stock?page=1&limit=10")
+    response = client.get("/api/pharmacy/medications/low-stock?page=1&limit=10", headers=auth_headers)
     data = response.json()
 
     assert response.status_code == 200
@@ -453,14 +505,14 @@ def test_alerta_stock_bajo():
     assert data["data"][0]["lote"] == "LOTE-BAJO-B"
     assert data["data"][1]["cantidad"] == 50
     assert data["data"][1]["lote"] == "LOTE-BAJO-A"
-def test_alertas_vencimiento_proximo():
+def test_alertas_vencimiento_proximo(auth_headers):
     #Limpieza y preparación
-    client.delete("/api/pharmacy/debug/clear-all-data")
+    client.delete("/api/pharmacy/debug/clear-all-data", headers=auth_headers)
     cod_med = 95000
     client.post("/api/pharmacy/medications", json={
         "codigo": cod_med, "nombre_medicamento": "Med_Vencimiento",
         "reg_invima": 123, "principio_activo": "Test", "presentacion": "Tab"
-    })
+    }, headers=auth_headers)
 
     hoy = datetime.now().date()
 
@@ -474,22 +526,22 @@ def test_alertas_vencimiento_proximo():
     # Lote A (Cerca)
     client.post(f"/api/pharmacy/medications/inventory/{cod_med}", json={
         "lote": "LOTE-5-DIAS", "cantidad": 100, "fecha_vencimiento": fecha_cerca, "precio": 10
-    })
+    }, headers=auth_headers)
     # Lote B (Límite)
     client.post(f"/api/pharmacy/medications/inventory/{cod_med}", json={
         "lote": "LOTE-30-DIAS", "cantidad": 100, "fecha_vencimiento": fecha_limite, "precio": 10
-    })
+    }, headers=auth_headers)
     # Lote C (Fuera de rango futuro)
     client.post(f"/api/pharmacy/medications/inventory/{cod_med}", json={
         "lote": "LOTE-SEGURO", "cantidad": 100, "fecha_vencimiento": fecha_lejos, "precio": 10
-    })
+    }, headers=auth_headers)
     # Lote D (Ya vencido)
     client.post(f"/api/pharmacy/medications/inventory/{cod_med}", json={
         "lote": "LOTE-VENCIDO", "cantidad": 100, "fecha_vencimiento": fecha_vencida, "precio": 10
-    })
+    }, headers=auth_headers)
 
     # Consultar endpoint
-    response = client.get("/api/pharmacy/medications/expiring-soon?page=1&limit=10")
+    response = client.get("/api/pharmacy/medications/expiring-soon?page=1&limit=10", headers=auth_headers)
     data = response.json()
 
     assert response.status_code == 200
@@ -502,7 +554,7 @@ def test_alertas_vencimiento_proximo():
     # Asegurarse de que el lote de 60 días y el vencido no se colaron
     assert "LOTE-SEGURO" not in lotes_nombres
     assert "LOTE-VENCIDO" not in lotes_nombres
-def test_actualizar_medicamento_exitoso():
+def test_actualizar_medicamento_exitoso(auth_headers):
     # Crear medicamento inicial
     codigo_update = 44000
     client.post("/api/pharmacy/medications", json={
@@ -511,7 +563,7 @@ def test_actualizar_medicamento_exitoso():
         "reg_invima": 111,
         "principio_activo": "P1",
         "presentacion": "Tableta"
-    })
+    }, headers=auth_headers)
 
     # Enviar actualización
     payload_update = {
@@ -522,26 +574,26 @@ def test_actualizar_medicamento_exitoso():
         "presentacion": "Jarabe"
     }
 
-    response = client.put(f"/api/pharmacy/medications/{codigo_update}", json=payload_update)
+    response = client.put(f"/api/pharmacy/medications/{codigo_update}", json=payload_update, headers=auth_headers)
     data = response.json()
 
     assert response.status_code == 200
     assert data["hasError"] is False
     assert data["Data"]["nombre_medicamento"] == "Nombre Actualizado"
     assert data["Data"]["presentacion"] == "Jarabe"
-def test_actualizar_lote_inventario_exitoso():
+def test_actualizar_lote_inventario_exitoso(auth_headers):
     cod_med = 66000
     client.post("/api/pharmacy/medications", json={
         "codigo": cod_med, "nombre_medicamento": "Med_Update_Lote",
         "reg_invima": 1, "principio_activo": "P", "presentacion": "T"
-    })
+    }, headers=auth_headers)
 
     res_creacion = client.post(f"/api/pharmacy/medications/inventory/{cod_med}", json={
         "lote": "LOTE-ORIGINAL",
         "cantidad": 100,
         "fecha_vencimiento": "2027-01-01",
         "precio": 5000
-    })
+    }, headers=auth_headers)
 
     # Extraemos el ID autogenerado que nos devuelve la API
     id_generado = res_creacion.json()["Data"]["id_inventario"]
@@ -554,7 +606,7 @@ def test_actualizar_lote_inventario_exitoso():
         "precio": 5500
     }
 
-    response = client.put(f"/api/pharmacy/medications/inventory/{id_generado}", json=payload_update)
+    response = client.put(f"/api/pharmacy/medications/inventory/{id_generado}", json=payload_update, headers=auth_headers)
     json_response = response.json()
 
     # Validaciones
@@ -563,7 +615,7 @@ def test_actualizar_lote_inventario_exitoso():
     assert json_response["Data"]["lote"] == "LOTE-CORREGIDO"
     assert json_response["Data"]["cantidad"] == 150
     assert json_response["Data"]["id_inventario"] == id_generado
-def test_bloqueo_edicion_lote_vencido():
+def test_bloqueo_edicion_lote_vencido(auth_headers):
     cod_med = 99000
     client.post("/api/pharmacy/medications", json={
         "codigo": cod_med,
@@ -571,7 +623,7 @@ def test_bloqueo_edicion_lote_vencido():
         "reg_invima": 123,
         "principio_activo": "Test",
         "presentacion": "Tab"
-    })
+    }, headers=auth_headers)
 
     fecha_vencida = (datetime.now() - timedelta(days=5)).date().isoformat()
 
@@ -580,7 +632,7 @@ def test_bloqueo_edicion_lote_vencido():
         "cantidad": 100,
         "fecha_vencimiento": fecha_vencida,
         "precio": 1000
-    })
+    }, headers=auth_headers)
 
     id_inventario = res_creacion.json()["Data"]["id_inventario"]
 
@@ -592,7 +644,7 @@ def test_bloqueo_edicion_lote_vencido():
         "precio": 2000
     }
 
-    response = client.put(f"/api/pharmacy/medications/inventory/{id_inventario}", json=payload_update)
+    response = client.put(f"/api/pharmacy/medications/inventory/{id_inventario}", json=payload_update, headers=auth_headers)
     json_response = response.json()
 
 
@@ -602,5 +654,3 @@ def test_bloqueo_edicion_lote_vencido():
 
     assert json_response["Data"]["lote"] == "LOTE-EXPIRADO"
     assert json_response["Data"]["cantidad"] == 100
-
-
