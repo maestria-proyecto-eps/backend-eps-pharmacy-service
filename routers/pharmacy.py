@@ -3,16 +3,18 @@ from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import text
 import math
 from typing import List
-from db.session import get_db
+from db.session import get_db_audit
 from models.medicamentos import MEDICAMENTOS, INVENTARIO
 from schemas.pharmacy import GenericResponse,  PaginatedResponse, APIResponse
 from schemas.pharmacy import MedicationCreate, MedicationWithBatchesRead, MedicationRead, MedicationRead2
 from schemas.pharmacy import InventoryWithMedicationRead,InventoryWithMedicationRead2,InventoryBatchCreate,InventoryDetail
 from datetime import datetime, timedelta
+from core.dependencias import RequireRole, get_usuario_actual
+
 router = APIRouter(prefix="/api/pharmacy", tags=["Pharmacy"])
 
-@router.post("/medications", status_code=201, response_model=GenericResponse[MedicationWithBatchesRead])
-def create_medication(med: MedicationCreate, db: Session = Depends(get_db)):
+@router.post("/medications", status_code=201, response_model=GenericResponse[MedicationWithBatchesRead], dependencies=[Depends(RequireRole(["Farmaceuta"]))])
+def create_medication(med: MedicationCreate, db: Session = Depends(get_db_audit)):
 
     by_codigo = db.query(MEDICAMENTOS).options(joinedload(MEDICAMENTOS.lotes_inventario)) \
         .filter(MEDICAMENTOS.codigo == med.codigo).first()
@@ -55,8 +57,8 @@ def create_medication(med: MedicationCreate, db: Session = Depends(get_db)):
         "Data": new_med
     }
 
-@router.post("/medications/inventory/{codigo_medicamento}", status_code=201, response_model=GenericResponse[InventoryWithMedicationRead])
-def create_inventory_batch(codigo_medicamento: int, batch: InventoryBatchCreate, db: Session = Depends(get_db)):
+@router.post("/medications/inventory/{codigo_medicamento}", status_code=201, response_model=GenericResponse[InventoryWithMedicationRead], dependencies=[Depends(RequireRole(["Farmaceuta"]))])
+def create_inventory_batch(codigo_medicamento: int, batch: InventoryBatchCreate, db: Session = Depends(get_db_audit)):
     # Verificar si el medicamento existe
     parent_med = db.query(MEDICAMENTOS).filter(MEDICAMENTOS.codigo == codigo_medicamento).first()
     if not parent_med:
@@ -97,8 +99,8 @@ def create_inventory_batch(codigo_medicamento: int, batch: InventoryBatchCreate,
         "Data": new_batch
     }
 
-@router.get("/medications", response_model=PaginatedResponse[MedicationRead])
-def list_medications(page: int = 1, limit: int = 10, db: Session = Depends(get_db)):
+@router.get("/medications", response_model=PaginatedResponse[MedicationRead], dependencies=[Depends(get_usuario_actual)])
+def list_medications(page: int = 1, limit: int = 10, db: Session = Depends(get_db_audit)):
     if page < 1: page = 1
     skip = (page - 1) * limit
     query = db.query(MEDICAMENTOS)
@@ -116,8 +118,8 @@ def list_medications(page: int = 1, limit: int = 10, db: Session = Depends(get_d
         "data": items
     }
 
-@router.get("/medications/inventory/{codigo_medicamento}", response_model=PaginatedResponse[InventoryDetail])
-def list_inventory_by_medication(codigo_medicamento: int,page: int = 1,limit: int = 10,db: Session = Depends(get_db)):
+@router.get("/medications/inventory/{codigo_medicamento}", response_model=PaginatedResponse[InventoryDetail], dependencies=[Depends(RequireRole(["Farmaceuta", "Enfermero"]))])
+def list_inventory_by_medication(codigo_medicamento: int,page: int = 1,limit: int = 10,db: Session = Depends(get_db_audit)):
     if page < 1: page = 1
     skip = (page - 1) * limit
 
@@ -151,8 +153,8 @@ def list_inventory_by_medication(codigo_medicamento: int,page: int = 1,limit: in
         "data": items
     }
 
-@router.get("/medications/low-stock", response_model=PaginatedResponse[InventoryWithMedicationRead])
-def get_low_stock_alerts(page: int = 1, limit: int = 10, db: Session = Depends(get_db)):
+@router.get("/medications/low-stock", response_model=PaginatedResponse[InventoryWithMedicationRead], dependencies=[Depends(RequireRole(["Farmaceuta", "Enfermero"]))])
+def get_low_stock_alerts(page: int = 1, limit: int = 10, db: Session = Depends(get_db_audit)):
     # Umbral de alerta
     THRESHOLD = 100
 
@@ -178,8 +180,8 @@ def get_low_stock_alerts(page: int = 1, limit: int = 10, db: Session = Depends(g
         "data": items
     }
 
-@router.get("/medications/expiring-soon", response_model=PaginatedResponse[InventoryWithMedicationRead])
-def get_expiring_soon_alerts(page: int = 1, limit: int = 10, db: Session = Depends(get_db)):
+@router.get("/medications/expiring-soon", response_model=PaginatedResponse[InventoryWithMedicationRead], dependencies=[Depends(RequireRole(["Farmaceuta", "Enfermero"]))])
+def get_expiring_soon_alerts(page: int = 1, limit: int = 10, db: Session = Depends(get_db_audit)):
     # Rango de fechas
     hoy = datetime.now().date()
     fecha_limite = hoy + timedelta(days=30)
@@ -209,8 +211,8 @@ def get_expiring_soon_alerts(page: int = 1, limit: int = 10, db: Session = Depen
         "data": items
     }
 
-@router.put("/medications/{codigo}", response_model=APIResponse[MedicationRead])
-def update_medication(codigo: int,payload: MedicationRead2,db: Session = Depends(get_db)):
+@router.put("/medications/{codigo}", response_model=APIResponse[MedicationRead], dependencies=[Depends(RequireRole(["Farmaceuta"]))])
+def update_medication(codigo: int,payload: MedicationRead2,db: Session = Depends(get_db_audit)):
     # Buscar el medicamento existente
     med_db = db.query(MEDICAMENTOS).filter(MEDICAMENTOS.codigo == codigo).first()
 
@@ -243,8 +245,8 @@ def update_medication(codigo: int,payload: MedicationRead2,db: Session = Depends
             "Data": None
         }
 
-@router.put("/medications/inventory/{id_inventario}", response_model=APIResponse[InventoryWithMedicationRead])
-def update_inventory_batch(id_inventario: int,payload: InventoryBatchCreate,db: Session = Depends(get_db)):
+@router.put("/medications/inventory/{id_inventario}", response_model=APIResponse[InventoryWithMedicationRead], dependencies=[Depends(RequireRole(["Farmaceuta", "Enfermero"]))])
+def update_inventory_batch(id_inventario: int,payload: InventoryBatchCreate,db: Session = Depends(get_db_audit)):
 
     batch_db = db.query(INVENTARIO).filter(INVENTARIO.id_inventario == id_inventario).first()
 
@@ -283,13 +285,13 @@ def update_inventory_batch(id_inventario: int,payload: InventoryBatchCreate,db: 
             "Data": None
         }
 
-@router.delete("/debug/clear-all-data")
-def clear_database_data(db: Session = Depends(get_db)):
-    try:
-        # Ejecutamos el truncate directamente
-        db.execute(text("TRUNCATE TABLE inventario, medicamentos RESTART IDENTITY CASCADE;"))
-        db.commit()
-        return {"hasError": False, "Message": "Todas las tablas han sido vaciadas y los contadores reiniciados."}
-    except Exception as e:
-        db.rollback()
-        return {"hasError": True, "Message": f"Error al limpiar tablas: {str(e)}"}
+# @router.delete("/debug/clear-all-data")
+# def clear_database_data(db: Session = Depends(get_db)):
+#     try:
+#         # Ejecutamos el truncate directamente
+#         db.execute(text("TRUNCATE TABLE inventario, medicamentos RESTART IDENTITY CASCADE;"))
+#         db.commit()
+#         return {"hasError": False, "Message": "Todas las tablas han sido vaciadas y los contadores reiniciados."}
+#     except Exception as e:
+#         db.rollback()
+#         return {"hasError": True, "Message": f"Error al limpiar tablas: {str(e)}"}
