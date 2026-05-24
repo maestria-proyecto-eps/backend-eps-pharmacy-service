@@ -2,6 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from core.logger import setup_logging, get_logger
 
+from routers import pharmacy
+
+
+
+
 app = FastAPI(
     title="EPS API 2",
     description="EPS management API 2",
@@ -42,3 +47,6 @@ def root():
     return {
         "message": "ok"
     }
+
+#Inventario medicamentos
+app.include_router(pharmacy.router)
